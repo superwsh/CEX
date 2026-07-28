@@ -1,0 +1,26 @@
+# 如果是amd芯片需要换成 swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/openjdk:8-alpine
+
+# 使用 JDK 8 作为基础镜像
+# 使用阿里云的Maven镜像
+FROM maven:3.9.12 as builder
+
+COPY settings.xml /root/.m2/settings.xml
+# 将本地文件复制到容器中
+COPY . /build/
+
+# 构建服务1
+WORKDIR /build/
+RUN mvn clean package -Dmaven.test.skip
+
+
+# 贝尔实验室 Spring 官方推荐镜像 JDK下载地址 https://bell-sw.com/pages/downloads/
+FROM bellsoft/liberica-openjdk-rocky:17.0.16-cds
+
+# 创建应用目录
+
+# 从构建阶段复制JAR文件
+COPY --from=builder /build/cex-modules/ucenter-api/target/*.jar /app.jar
+
+ENV TZ=Asia/Shanghai LANG=C.UTF-8 LC_ALL=C.UTF-8 JAVA_OPTS="-Xms512m -Xmx1024m"
+EXPOSE 6001
+CMD ["java", "-Djava.security.egd=file:/dev/./urandom", "-jar", "/app.jar"]
