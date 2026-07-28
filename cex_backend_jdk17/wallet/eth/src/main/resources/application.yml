@@ -1,0 +1,93 @@
+server:
+  port: 7003
+  servlet:
+    context-path: /eth
+
+
+spring:
+  application:
+    name: service-rpc-eth
+  cloud:
+    nacos:
+      username: @nacos.username@
+      password: @nacos.password@
+      discovery:
+        server-addr: ${NACOS_HOST:cloud}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:cex}
+      config:
+        server-addr: ${spring.cloud.nacos.discovery.server-addr}
+        namespace: ${spring.cloud.nacos.discovery.namespace}
+  config:
+    import:
+      - nacos:application-common.yml
+#      - nacos:${spring.application.name}.yml
+
+--- # 数据库 配置
+spring:
+  main:
+    allow-circular-references: true # 允许循环依赖（Spring Boot 3.x 默认 false）
+  # redis通用配置 子服务可以自行配置进行覆盖
+  data:
+#    redis:
+#      host: 39.98.78.102
+#      port: 9531
+#      # redis 密码必须配置
+#      password: iiisct#2025
+#      database: 11
+#      timeout: 10000
+#      ssl.enabled: false
+    # spring.data.mongodb.uri
+    mongodb:
+      uri: mongodb://admin:admin123@mongo:27017/wallet?authSource=admin
+--- # kafka 配置
+spring:
+  kafka:
+    bootstrap-servers: kafka:9092
+    producer:
+      batch-size: 1000
+    consumer:
+      group-id: default-group
+    template:
+      default-topic: test
+    listener:
+      concurrency: 1
+
+# 币种信息配置
+coin:
+#  rpc: http://host.docker.internal:8545
+  rpc: http://host.docker.internal:8545
+  name: Ethereum
+  unit: ETH
+  keystore-path: wallet-data/ETH/keystore
+#  keystore-path: /www/wallet-data/ETH/keystore
+  # 初始化币种信息
+  init-block-height: 11398709
+  step: 5
+  withdraw-wallet: UTC--2025-08-30T05-14-13.559000000Z--260db3aa6b460505e25702ea0129af01a6306b59.json
+  withdraw-wallet-password: c2ewithdraweth
+  gas-limit: 200000
+  min-collect-amount: 0.001
+  ignore-from-address: "0x260db3aa6b460505e25702ea0129af01a6306b59"
+
+watcher:
+  init-block-height: 0
+  step: 5
+  confirmation: 1
+  interval: 5000
+
+
+# 合约配置信息
+contract:
+  # 合约地址（示例：EUSDT 测试代币）
+  address: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+  # 合约精度单位（根据合约 decimals 值选择对应单位名称）
+  # 单位与小数位对照：
+  #   wei: 0, kwei: 3, wwei: 4, mwei: 6,
+  #   gwei: 9, szabo: 12, finney: 15, ether: 18,
+  #   kether: 21, mether: 24, gether: 27
+  decimals: mwei
+  # 合约转账交易的 Gas Limit（建议根据实际调用情况调整）
+  gas-limit: 500000
+  # Etherscan 事件日志监听所需的 topic0（通常为 Transfer 事件的 keccak256 哈希）
+  # 获取方式：在 Etherscan 上搜索该合约，打开任意一笔交易，切换到 Event Logs Tab 查看
+  event-topic0: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a1128f55a4df523b3ef"

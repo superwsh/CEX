@@ -1,0 +1,11 @@
+coin:
+  rpc: http://host.docker.internal:8545
+  name: USDT
+  unit: USDT
+  chain-id: 1
+  gas-limit: 50000
+  gas-multiplier: 1.2
+  keystore-path: /www/wallet-data/ETH/keystore
+  withdraw-wallet: UTC--2025-08-30T05-14-13.559000000Z--260db3aa6b460505e25702ea0129af01a6306b59.json
+  withdraw-wallet-password: c2ewithdraweth
+  min-collect-amount: 3

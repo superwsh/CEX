@@ -1,0 +1,128 @@
+server:
+  port: 6009
+  servlet:
+    context-path: /exchange
+
+spring:
+  application:
+    name: service-wallet
+  cloud:
+    nacos:
+      username: @nacos.username@
+      password: @nacos.password@
+      discovery:
+        server-addr: ${NACOS_HOST:cloud}:${NACOS_PORT:8848}
+        namespace: ${NACOS_NAMESPACE:cex}
+      config:
+        server-addr: ${spring.cloud.nacos.discovery.server-addr}
+        namespace: ${spring.cloud.nacos.discovery.namespace}
+  config:
+    import:
+      - nacos:application-common.yml
+#      - nacos:${spring.application.name}.yml
+
+--- # 数据库 配置
+spring:
+  main:
+    allow-circular-references: true # 允许循环依赖（Spring Boot 3.x 默认 false）
+  # redis通用配置 子服务可以自行配置进行覆盖
+  data:
+    redis:
+      host: redis
+      port: 6379
+      # redis 密码必须配置
+      password: Magician8421
+      database: 11
+      timeout: 10000
+      ssl.enabled: false
+    mongodb:
+      uri: mongodb://admin:admin123@mongo:27017/bizzan?authSource=admin
+      database: bitrade
+  datasource:
+    type: com.zaxxer.hikari.HikariDataSource
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:123456}
+    url: jdbc:mysql://${MYSQL_HOST:mysql-db}:${MYSQL_PORT:3306}/${MYSQL_DB:cloud_biz}?characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowMultiQueries=true&useJDBCCompliantTimezoneShift=true&useLegacyDatetimeCode=false&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&allowPublicKeyRetrieval=true
+  jpa:
+    hibernate:
+      ddl-auto: none
+#      naming:
+#        physical-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+    show-sql: true
+#    properties:
+#      hibernate:
+#        hql:
+#          parser:
+#            strict: false # 关闭 HQL 严格解析（关键！贴近 1.x 行为）
+
+--- # kafka 配置
+spring:
+  kafka:
+    bootstrap-servers: kafka:9092
+    producer:
+      linger: 1
+      retries: 0
+      batch-size: 256
+      buffer-memory: 1048576
+    consumer:
+      enable-auto-commit: false
+      auto-commit-interval: 100
+      auto-offset-reset: earliest
+      group-id: default-group
+      max-poll-records: 50
+      concurrency: 9
+
+
+--- # 邮件配置
+spring:
+  mail:
+    host: smtp.126.com # 邮件服务器地址（示例：QQ 邮箱 SMTP 服务器）
+    port: 465 # 端口（QQ 邮箱 587，163 邮箱 25）
+    username: 323232@126.com
+    password: fdsaf3232
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true # 开启认证
+          starttls:
+            enable: true # 开启 TLS（可选）
+            required: true
+
+water:
+  proof:
+    app:
+      id: 203187463
+      secret:
+        key: 0qatdl6QlhK5cAtEAfE2MA**
+
+
+geetest:
+  captchaId: ebd15c83cb7daecc963bc87b2c9cd76
+  privateKey: 26e11b2e8ed2ccbcf060756f2b845fd
+  newFailback: 0
+
+es:
+  username:
+  password: ""
+  mine:
+    index: ""
+    type: ""
+  public:
+    ip: ""
+  private:
+    ip: #
+  port: 9200
+
+
+spark:
+  system:
+    work-id: 1
+    data-center-id: 1
+    host: smtp.126.com
+    name: BIZZAN
+    # 接收系统通知的邮箱，多个用【,】分割
+    admins: XXXXX@qq.com
+    # 通知接收手机
+    admin-phones: 1800000000

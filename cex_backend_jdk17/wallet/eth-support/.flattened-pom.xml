@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.bizzan.bitrade</groupId>
+    <artifactId>wallet-rpc</artifactId>
+    <version>2.5.3</version>
+  </parent>
+  <groupId>com.bizzan.bitrade</groupId>
+  <artifactId>eth-support</artifactId>
+  <version>2.5.3</version>
+  <dependencies>
+    <dependency>
+      <groupId>com.bizzan.bitrade</groupId>
+      <artifactId>rpc-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.web3j</groupId>
+      <artifactId>core</artifactId>
+      <version>4.12.3</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-webflux</artifactId>
+    </dependency>
+  </dependencies>
+</project>
