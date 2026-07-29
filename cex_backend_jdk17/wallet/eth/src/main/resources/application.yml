@@ -12,7 +12,7 @@ spring:
       username: @nacos.username@
       password: @nacos.password@
       discovery:
-        server-addr: ${NACOS_HOST:cloud}:${NACOS_PORT:8848}
+        server-addr: ${NACOS_HOST:212.129.154.147}:${NACOS_PORT:8848}
         namespace: ${NACOS_NAMESPACE:cex}
       config:
         server-addr: ${spring.cloud.nacos.discovery.server-addr}
@@ -38,11 +38,11 @@ spring:
 #      ssl.enabled: false
     # spring.data.mongodb.uri
     mongodb:
-      uri: mongodb://admin:admin123@mongo:27017/wallet?authSource=admin
+      uri: mongodb://admin:admin123@212.129.154.147:27017/wallet?authSource=admin
 --- # kafka 配置
 spring:
   kafka:
-    bootstrap-servers: kafka:9092
+    bootstrap-servers: 212.129.154.147:9092
     producer:
       batch-size: 1000
     consumer:
