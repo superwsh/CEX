@@ -7,20 +7,20 @@ server:
 spring:
   application:
     name: @artifactId@
-#  cloud:
-#    nacos:
-#      username: @nacos.username@
-#      password: @nacos.password@
-#      discovery:
-#        server-addr: ${NACOS_HOST:cloud}:${NACOS_PORT:8848}
-#        namespace: ${NACOS_NAMESPACE:cex}
-#      config:
-#        server-addr: ${spring.cloud.nacos.discovery.server-addr}
-#        namespace: ${spring.cloud.nacos.discovery.namespace}
-#  config:
-#    import:
-#      - nacos:application-common.yml
-#      - nacos:${spring.application.name}.yml
+ cloud:
+   nacos:
+     username: @nacos.username@
+     password: @nacos.password@
+     discovery:
+       server-addr: ${NACOS_HOST:cloud}:${NACOS_PORT:8848}
+       namespace: ${NACOS_NAMESPACE:cex}
+     config:
+       server-addr: ${spring.cloud.nacos.discovery.server-addr}
+       namespace: ${spring.cloud.nacos.discovery.namespace}
+ config:
+   import:
+     - nacos:application-common.yml
+     - nacos:${spring.application.name}.yml
 logging:
   level:
     root: info
@@ -64,7 +64,7 @@ spring:
 --- # kafka 配置
 spring:
   kafka:
-    bootstrap-servers: kafka:9092
+    bootstrap-servers: 212.129.154.147:9092
     producer:
       linger: 1
       retries: 0
