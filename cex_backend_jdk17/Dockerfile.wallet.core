@@ -21,4 +21,4 @@ FROM bellsoft/liberica-openjdk-rocky:17.0.16-cds
 COPY --from=builder /build/wallet/wallet-core/target/*.jar /app.jar
 ENV TZ=Asia/Shanghai LANG=C.UTF-8 LC_ALL=C.UTF-8 JAVA_OPTS="-Xms512m -Xmx1024m"
 EXPOSE 6009
-CMD ["java", "-Djava.security.egd=file:/dev/./urandom", "-jar", "/app.jar"]
+CMD java -Djava.security.egd=file:/dev/./urandom $JAVA_OPTS -jar /app.jar

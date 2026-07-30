@@ -24,4 +24,4 @@ RUN mkdir -p /www/wallet-data/ETH/keystore/ && \
 COPY --from=builder /build/wallet/erc-eusdt/target/*.jar /app.jar
 ENV TZ=Asia/Shanghai LANG=C.UTF-8 LC_ALL=C.UTF-8 JAVA_OPTS="-Xms512m -Xmx1024m"
 EXPOSE 7004
-CMD ["java", "-Djava.security.egd=file:/dev/./urandom", "-jar", "/app.jar"]
+CMD java -Djava.security.egd=file:/dev/./urandom $JAVA_OPTS -jar /app.jar

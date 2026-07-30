@@ -66,9 +66,9 @@ spring:
     bootstrap-servers: kafka:9092
     producer:
       linger: 1
-      retries: 0
+      retries: 3
       batch-size: 256
-      buffer-memory: 1048576
+      buffer-memory: 33554432
     consumer:
       enable-auto-commit: false
       auto-commit-interval: 100
