@@ -64,7 +64,7 @@ spring:
 --- # kafka 配置
 spring:
   kafka:
-    bootstrap-servers: 212.129.154.147:9092
+    bootstrap-servers: kafka:9092
     producer:
       linger: 1
       retries: 0
