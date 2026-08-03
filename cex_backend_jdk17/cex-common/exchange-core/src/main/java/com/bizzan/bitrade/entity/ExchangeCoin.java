@@ -8,28 +8,47 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 
+/**
+ * 交易币对信息
+ */
 @Entity
 @Data
 public class ExchangeCoin {
-    //交易币种名称，格式：BTC/USDT
+    /**
+     * 交易币种名称，格式：BTC/USDT
+     */
     @NotNull(message = "交易对不能为空")
     @Id
     private String symbol;
-    //交易币种符号
+    /**
+     * 交易币种符号
+     */
     private String coinSymbol;
-    //结算币种符号，如USDT
+    /**
+     * 结算币种符号，如USDT
+     */
     private String baseSymbol;
-    //状态，1：启用，2：禁止
+    /**
+     * 状态，1：启用，2：禁止
+     */
     private int enable;
-    
-    //交易手续费
+
+    /**
+     * 交易手续费
+     */
     @Column(columnDefinition = "decimal(8,4) comment '交易手续费'")
     private BigDecimal fee;
-    //排序，从小到大
+    /**
+     * 排序，从小到大
+     */
     private int sort;
-    //交易币小数精度
+    /**
+     * 交易币小数精度
+     */
     private int coinScale;
-    //基币小数精度
+    /**
+     * 基币小数精度
+     */
     private int baseCoinScale;
     @Column(columnDefinition = "decimal(18,8) default 0 comment '卖单最低价格'")
     private BigDecimal minSellPrice;
