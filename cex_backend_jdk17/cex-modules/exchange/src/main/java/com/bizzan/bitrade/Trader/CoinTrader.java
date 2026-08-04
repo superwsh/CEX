@@ -71,34 +71,7 @@ public class CoinTrader {
      * @param exchangeOrder
      */
     public void addLimitPriceOrder(ExchangeOrder exchangeOrder) {
-        if (exchangeOrder.getType() != ExchangeOrderType.LIMIT_PRICE) {
-            return;
-        }
-        //logger.info("addLimitPriceOrder,orderId = {}", exchangeOrder.getOrderId());
-        TreeMap<BigDecimal, MergeOrder> list;
-        if (exchangeOrder.getDirection() == ExchangeOrderDirection.BUY) {
-            list = buyLimitPriceQueue;
-            buyTradePlate.add(exchangeOrder);
-            if (ready) {
-                sendTradePlateMessage(buyTradePlate);
-            }
-        } else {
-            list = sellLimitPriceQueue;
-            sellTradePlate.add(exchangeOrder);
-            if (ready) {
-                sendTradePlateMessage(sellTradePlate);
-            }
-        }
-        synchronized (list) {
-            MergeOrder mergeOrder = list.get(exchangeOrder.getPrice());
-            if (mergeOrder == null) {
-                mergeOrder = new MergeOrder();
-                mergeOrder.add(exchangeOrder);
-                list.put(exchangeOrder.getPrice(), mergeOrder);
-            } else {
-                mergeOrder.add(exchangeOrder);
-            }
-        }
+
     }
 
     public void addMarketPriceOrder(ExchangeOrder exchangeOrder) {
@@ -128,19 +101,11 @@ public class CoinTrader {
      * @param exchangeOrder
      * @throws ParseException
      */
-    public void trade(ExchangeOrder exchangeOrder) throws ParseException {
-        if (tradingHalt) {
+    public void trade(ExchangeOrder exchangeOrder) {
+        //由于一笔订单可能被撮合多次，所以需要判断成交量是否已完成
+        if (exchangeOrder.getAmount().subtract(exchangeOrder.getTradedAmount()).compareTo(BigDecimal.ZERO) <= 0) {
             return;
         }
-        //logger.info("trade order={}",exchangeOrder);
-        if (!symbol.equalsIgnoreCase(exchangeOrder.getSymbol())) {
-            logger.info("unsupported symbol,coin={},base={}", exchangeOrder.getCoinSymbol(), exchangeOrder.getBaseSymbol());
-            return;
-        }
-        if (exchangeOrder.getAmount().compareTo(BigDecimal.ZERO) <= 0 || exchangeOrder.getAmount().subtract(exchangeOrder.getTradedAmount()).compareTo(BigDecimal.ZERO) <= 0) {
-            return;
-        }
-
         TreeMap<BigDecimal, MergeOrder> limitPriceOrderList;
         LinkedList<ExchangeOrder> marketPriceOrderList;
         if (exchangeOrder.getDirection() == ExchangeOrderDirection.BUY) {
@@ -151,102 +116,11 @@ public class CoinTrader {
             marketPriceOrderList = buyMarketQueue;
         }
         if (exchangeOrder.getType() == ExchangeOrderType.MARKET_PRICE) {
-            //logger.info(">>>>>市价单>>>交易与限价单交易");
-            //与限价单交易
+            //市价单与限价单匹配
             matchMarketPriceWithLPList(limitPriceOrderList, exchangeOrder);
-        } else if (exchangeOrder.getType() == ExchangeOrderType.LIMIT_PRICE) {
-            //限价单价格必须大于0
-            if (exchangeOrder.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
-                return;
-            }
-            // 抢购无需特殊处理，直接成交即可，但无法市价成交，在exchange-api做过滤控制
-            // 仅分摊模式需要做特殊处理(分摊模式下，先有客户下一堆买单，然后由管理员发布卖单，根据比例分配)
-            if (publishType == ExchangeCoinPublishType.FENTAN
-                    && exchangeOrder.getDirection() == ExchangeOrderDirection.SELL) {
-                logger.info(">>>>>分摊卖单>>>开始处理");
-                // 仅处在结束时间与清盘时间内的卖单需要特殊处理
-                if (exchangeOrder.getTime().longValue() < dateTimeFormat.parse(clearTime).getTime()) {
-                    logger.info(">>>>>分摊卖单>>>处在结束时间与清盘时间内");
-                    //将卖单分摊成交，活动卖单无需压入卖盘显示在前端
-                    matchLimitPriceWithLPListByFENTAN(limitPriceOrderList, exchangeOrder, false);
-                    return;
-                }
-            }
-            //logger.info(">>>>>限价单>>>交易与限价单交易");
-            //先与限价单交易
-            matchLimitPriceWithLPList(limitPriceOrderList, exchangeOrder, false);
-            if (exchangeOrder.getAmount().compareTo(exchangeOrder.getTradedAmount()) > 0) {
-                //logger.info(">>>>限价单未交易完>>>>与市价单交易>>>>");
-                //后与市价单交易
-                matchLimitPriceWithMPList(marketPriceOrderList, exchangeOrder);
-            }
         }
     }
 
-    /**
-     * 分摊抢购模式下的交易处理规则
-     *
-     * @param lpList
-     * @param focusedOrder
-     * @param canEnterList
-     */
-
-    public void matchLimitPriceWithLPListByFENTAN(TreeMap<BigDecimal, MergeOrder> lpList, ExchangeOrder focusedOrder, boolean canEnterList) {
-        List<ExchangeTrade> exchangeTrades = new ArrayList<>();
-        List<ExchangeOrder> completedOrders = new ArrayList<>();
-        synchronized (lpList) {
-            Iterator<Map.Entry<BigDecimal, MergeOrder>> mergeOrderIterator = lpList.entrySet().iterator();
-            boolean exitLoop = false;
-            while (!exitLoop && mergeOrderIterator.hasNext()) {
-                Map.Entry<BigDecimal, MergeOrder> entry = mergeOrderIterator.next();
-                MergeOrder mergeOrder = entry.getValue();
-                Iterator<ExchangeOrder> orderIterator = mergeOrder.iterator();
-                //买入单需要匹配的价格不大于委托价，否则退出
-                if (focusedOrder.getDirection() == ExchangeOrderDirection.BUY && mergeOrder.getPrice().compareTo(focusedOrder.getPrice()) > 0) {
-                    break;
-                }
-                //卖出单需要匹配的价格不小于委托价，否则退出
-                if (focusedOrder.getDirection() == ExchangeOrderDirection.SELL && mergeOrder.getPrice().compareTo(focusedOrder.getPrice()) < 0) {
-                    break;
-                }
-                BigDecimal totalAmount = mergeOrder.getTotalAmount();
-                while (orderIterator.hasNext()) {
-                    ExchangeOrder matchOrder = orderIterator.next();
-                    //处理匹配
-                    ExchangeTrade trade = processMatchByFENTAN(focusedOrder, matchOrder, totalAmount);
-                    exchangeTrades.add(trade);
-                    //判断匹配单是否完成
-                    if (matchOrder.isCompleted()) {
-                        //当前匹配的订单完成交易，删除该订单
-                        orderIterator.remove();
-                        completedOrders.add(matchOrder);
-                    }
-                    //判断交易单是否完成
-                    if (focusedOrder.isCompleted()) {
-                        //交易完成
-                        completedOrders.add(focusedOrder);
-                        //退出循环
-                        exitLoop = true;
-                        break;
-                    }
-                }
-                if (mergeOrder.size() == 0) {
-                    mergeOrderIterator.remove();
-                }
-            }
-        }
-        //如果还没有交易完，订单压入列表中
-        if (focusedOrder.getTradedAmount().compareTo(focusedOrder.getAmount()) < 0 && canEnterList) {
-            addLimitPriceOrder(focusedOrder);
-        }
-        //每个订单的匹配批量推送
-        handleExchangeTrade(exchangeTrades);
-        if (completedOrders.size() > 0) {
-            orderCompleted(completedOrders);
-            TradePlate plate = focusedOrder.getDirection() == ExchangeOrderDirection.BUY ? sellTradePlate : buyTradePlate;
-            sendTradePlateMessage(plate);
-        }
-    }
 
     /**
      * 限价委托单与限价队列匹配
@@ -255,59 +129,7 @@ public class CoinTrader {
      * @param focusedOrder 交易订单
      */
     public void matchLimitPriceWithLPList(TreeMap<BigDecimal, MergeOrder> lpList, ExchangeOrder focusedOrder, boolean canEnterList) {
-        List<ExchangeTrade> exchangeTrades = new ArrayList<>();
-        List<ExchangeOrder> completedOrders = new ArrayList<>();
-        synchronized (lpList) {
-            Iterator<Map.Entry<BigDecimal, MergeOrder>> mergeOrderIterator = lpList.entrySet().iterator();
-            boolean exitLoop = false;
-            while (!exitLoop && mergeOrderIterator.hasNext()) {
-                Map.Entry<BigDecimal, MergeOrder> entry = mergeOrderIterator.next();
-                MergeOrder mergeOrder = entry.getValue();
-                Iterator<ExchangeOrder> orderIterator = mergeOrder.iterator();
-                //买入单需要匹配的价格不大于委托价，否则退出
-                if (focusedOrder.getDirection() == ExchangeOrderDirection.BUY && mergeOrder.getPrice().compareTo(focusedOrder.getPrice()) > 0) {
-                    break;
-                }
-                //卖出单需要匹配的价格不小于委托价，否则退出
-                if (focusedOrder.getDirection() == ExchangeOrderDirection.SELL && mergeOrder.getPrice().compareTo(focusedOrder.getPrice()) < 0) {
-                    break;
-                }
-                while (orderIterator.hasNext()) {
-                    ExchangeOrder matchOrder = orderIterator.next();
-                    //处理匹配
-                    ExchangeTrade trade = processMatch(focusedOrder, matchOrder);
-                    exchangeTrades.add(trade);
-                    //判断匹配单是否完成
-                    if (matchOrder.isCompleted()) {
-                        //当前匹配的订单完成交易，删除该订单
-                        orderIterator.remove();
-                        completedOrders.add(matchOrder);
-                    }
-                    //判断交易单是否完成
-                    if (focusedOrder.isCompleted()) {
-                        //交易完成
-                        completedOrders.add(focusedOrder);
-                        //退出循环
-                        exitLoop = true;
-                        break;
-                    }
-                }
-                if (mergeOrder.size() == 0) {
-                    mergeOrderIterator.remove();
-                }
-            }
-        }
-        //如果还没有交易完，订单压入列表中
-        if (focusedOrder.getTradedAmount().compareTo(focusedOrder.getAmount()) < 0 && canEnterList) {
-            addLimitPriceOrder(focusedOrder);
-        }
-        //每个订单的匹配批量推送
-        handleExchangeTrade(exchangeTrades);
-        if (completedOrders.size() > 0) {
-            orderCompleted(completedOrders);
-            TradePlate plate = focusedOrder.getDirection() == ExchangeOrderDirection.BUY ? sellTradePlate : buyTradePlate;
-            sendTradePlateMessage(plate);
-        }
+
     }
 
     /**
@@ -317,39 +139,7 @@ public class CoinTrader {
      * @param focusedOrder 交易订单
      */
     public void matchLimitPriceWithMPList(LinkedList<ExchangeOrder> mpList, ExchangeOrder focusedOrder) {
-        List<ExchangeTrade> exchangeTrades = new ArrayList<>();
-        List<ExchangeOrder> completedOrders = new ArrayList<>();
-        synchronized (mpList) {
-            Iterator<ExchangeOrder> iterator = mpList.iterator();
-            while (iterator.hasNext()) {
-                ExchangeOrder matchOrder = iterator.next();
-                ExchangeTrade trade = processMatch(focusedOrder, matchOrder);
-                logger.info(">>>>>" + trade);
-                if (trade != null) {
-                    exchangeTrades.add(trade);
-                }
-                //判断匹配单是否完成，市价单amount为成交量
-                if (matchOrder.isCompleted()) {
-                    iterator.remove();
-                    completedOrders.add(matchOrder);
-                }
-                //判断吃单是否完成，判断成交量是否完成
-                if (focusedOrder.isCompleted()) {
-                    //交易完成
-                    completedOrders.add(focusedOrder);
-                    //退出循环
-                    break;
-                }
-            }
-        }
-        //如果还没有交易完，订单压入列表中
-        if (focusedOrder.getTradedAmount().compareTo(focusedOrder.getAmount()) < 0) {
-            addLimitPriceOrder(focusedOrder);
-        }
-        //每个订单的匹配批量推送
-        logger.info("限价委托单与市价队列匹配完成，发送成功消息");
-        handleExchangeTrade(exchangeTrades);
-        orderCompleted(completedOrders);
+
     }
 
 
@@ -361,7 +151,7 @@ public class CoinTrader {
      */
     public void matchMarketPriceWithLPList(TreeMap<BigDecimal, MergeOrder> lpList, ExchangeOrder focusedOrder) {
         List<ExchangeTrade> exchangeTrades = new ArrayList<>();
-        List<ExchangeOrder> completedOrders = new ArrayList<>();
+        List<ExchangeOrder> completedOrders = new ArrayList<>();//已完成订单--统一处理并通知
         synchronized (lpList) {
             Iterator<Map.Entry<BigDecimal, MergeOrder>> mergeOrderIterator = lpList.entrySet().iterator();
             boolean exitLoop = false;
@@ -378,33 +168,30 @@ public class CoinTrader {
                     }
                     //判断匹配单是否完成
                     if (matchOrder.isCompleted()) {
-                        //当前匹配的订单完成交易，删除该订单
                         orderIterator.remove();
                         completedOrders.add(matchOrder);
                     }
-                    //判断焦点订单是否完成
+                    //判断委托单是否完成
                     if (focusedOrder.isCompleted()) {
                         completedOrders.add(focusedOrder);
-                        //退出循环
                         exitLoop = true;
                         break;
                     }
                 }
+                //该价格的订单已全部撮合完成，从TreeMap中移除
                 if (mergeOrder.size() == 0) {
                     mergeOrderIterator.remove();
                 }
             }
         }
-        //如果还没有交易完，订单压入列表中,市价买单按成交量算
-        if (focusedOrder.getDirection() == ExchangeOrderDirection.SELL && focusedOrder.getTradedAmount().compareTo(focusedOrder.getAmount()) < 0
-                || focusedOrder.getDirection() == ExchangeOrderDirection.BUY && focusedOrder.getTurnover().compareTo(focusedOrder.getAmount()) < 0) {
+        //如果订单还没有完成，添加到市价单列表中，等待再次撮合
+        if (!focusedOrder.isCompleted()) {
             addMarketPriceOrder(focusedOrder);
         }
-        //每个订单的匹配批量推送
         handleExchangeTrade(exchangeTrades);
         if (completedOrders.size() > 0) {
             orderCompleted(completedOrders);
-            TradePlate plate = focusedOrder.getDirection() == ExchangeOrderDirection.BUY ? sellTradePlate : buyTradePlate;
+            TradePlate plate = focusedOrder.getDirection() == ExchangeOrderDirection.BUY ? buyTradePlate : sellTradePlate;
             sendTradePlateMessage(plate);
         }
     }
@@ -434,14 +221,13 @@ public class CoinTrader {
      * @return
      */
     private BigDecimal adjustMarketOrderTurnover(ExchangeOrder order, BigDecimal dealPrice) {
-        if (order.getDirection() == ExchangeOrderDirection.BUY && order.getType() == ExchangeOrderType.MARKET_PRICE) {
-            BigDecimal leftTurnover = order.getAmount().subtract(order.getTurnover());
-            if (leftTurnover.divide(dealPrice, coinScale, BigDecimal.ROUND_DOWN)
-                    .compareTo(BigDecimal.ZERO) == 0) {
-                order.setTurnover(order.getAmount());
-                return leftTurnover;
-            }
+        BigDecimal leftTurnover = order.getAmount().subtract(order.getTurnover());
+        if (leftTurnover.divide(dealPrice, coinScale, BigDecimal.ROUND_DOWN)
+                .compareTo(BigDecimal.ZERO) == 0) {
+            order.setTurnover(order.getAmount());
+            return leftTurnover;
         }
+
         return BigDecimal.ZERO;
     }
 
@@ -453,45 +239,37 @@ public class CoinTrader {
      * @return
      */
     private ExchangeTrade processMatch(ExchangeOrder focusedOrder, ExchangeOrder matchOrder) {
-        //需要交易的数量，成交量,成交价，可用数量
+        //需要的数量，成交价，可用数量
         BigDecimal needAmount, dealPrice, availAmount;
-        //如果匹配单是限价单，则以其价格为成交价
+        //成交价--焦点单和匹配单中至少有一个是限价单，成交价要以限价单的价格为准
         if (matchOrder.getType() == ExchangeOrderType.LIMIT_PRICE) {
             dealPrice = matchOrder.getPrice();
         } else {
-            //如果是市价单则以焦点单的价格作成交价
             dealPrice = focusedOrder.getPrice();
-        }
-        //成交价必须大于0
-        if (dealPrice.compareTo(BigDecimal.ZERO) <= 0) {
-            return null;
         }
         needAmount = calculateTradedAmount(focusedOrder, dealPrice);
         availAmount = calculateTradedAmount(matchOrder, dealPrice);
         //计算成交量
-        BigDecimal tradedAmount = (availAmount.compareTo(needAmount) >= 0 ? needAmount : availAmount);
-        logger.info("dealPrice={},amount={}", dealPrice, tradedAmount);
-        //如果成交额为0说明剩余额度无法成交，退出
+        BigDecimal tradedAmount = needAmount.compareTo(availAmount) < 0 ? needAmount : availAmount;
         if (tradedAmount.compareTo(BigDecimal.ZERO) == 0) {
             return null;
         }
-
         //计算成交额,成交额要保留足够精度
-        BigDecimal turnover = tradedAmount.multiply(dealPrice);
+        BigDecimal turnover = dealPrice.multiply(tradedAmount);
         matchOrder.setTradedAmount(matchOrder.getTradedAmount().add(tradedAmount));
         matchOrder.setTurnover(matchOrder.getTurnover().add(turnover));
         focusedOrder.setTradedAmount(focusedOrder.getTradedAmount().add(tradedAmount));
         focusedOrder.setTurnover(focusedOrder.getTurnover().add(turnover));
 
-        //创建成交记录
         ExchangeTrade exchangeTrade = new ExchangeTrade();
-        exchangeTrade.setSymbol(symbol);
-        exchangeTrade.setAmount(tradedAmount);
-        exchangeTrade.setDirection(focusedOrder.getDirection());
+        exchangeTrade.setSymbol(focusedOrder.getSymbol());
         exchangeTrade.setPrice(dealPrice);
+        exchangeTrade.setAmount(tradedAmount);
         exchangeTrade.setBuyTurnover(turnover);
         exchangeTrade.setSellTurnover(turnover);
-        //校正市价单剩余成交额
+        exchangeTrade.setDirection(focusedOrder.getDirection());
+        //在市价买单场景下，剩余金额不够买最小单位币时，将剩余金额加到这次成交记录上，并标记该订单已完成
+        //如果不这么做，这个订单会永远被视为未完成，永久存留在内存中，当这样的订单足够多就可能导致内存爆炸
         if (ExchangeOrderType.MARKET_PRICE == focusedOrder.getType() && focusedOrder.getDirection() == ExchangeOrderDirection.BUY) {
             BigDecimal adjustTurnover = adjustMarketOrderTurnover(focusedOrder, dealPrice);
             exchangeTrade.setBuyTurnover(turnover.add(adjustTurnover));
@@ -499,7 +277,6 @@ public class CoinTrader {
             BigDecimal adjustTurnover = adjustMarketOrderTurnover(matchOrder, dealPrice);
             exchangeTrade.setBuyTurnover(turnover.add(adjustTurnover));
         }
-
         if (focusedOrder.getDirection() == ExchangeOrderDirection.BUY) {
             exchangeTrade.setBuyOrderId(focusedOrder.getOrderId());
             exchangeTrade.setSellOrderId(matchOrder.getOrderId());
@@ -507,7 +284,6 @@ public class CoinTrader {
             exchangeTrade.setBuyOrderId(matchOrder.getOrderId());
             exchangeTrade.setSellOrderId(focusedOrder.getOrderId());
         }
-
         exchangeTrade.setTime(Calendar.getInstance().getTimeInMillis());
         if (matchOrder.getType() == ExchangeOrderType.LIMIT_PRICE) {
             if (matchOrder.getDirection() == ExchangeOrderDirection.BUY) {
@@ -520,79 +296,19 @@ public class CoinTrader {
     }
 
     /**
-     * 处理两个匹配的委托订单
+     * 推送订单消息
      *
-     * @param focusedOrder 焦点单
-     * @param matchOrder   匹配单
-     * @return
+     * @param trades
      */
-    private ExchangeTrade processMatchByFENTAN(ExchangeOrder focusedOrder, ExchangeOrder matchOrder, BigDecimal totalAmount) {
-        //需要交易的数量，成交量,成交价，可用数量
-        BigDecimal dealPrice;
-        //如果匹配单是限价单，则以其价格为成交价
-        if (matchOrder.getType() == ExchangeOrderType.LIMIT_PRICE) {
-            dealPrice = matchOrder.getPrice();
-        } else {
-            dealPrice = focusedOrder.getPrice();
-        }
-        //成交价必须大于0
-        if (dealPrice.compareTo(BigDecimal.ZERO) <= 0) {
-            return null;
-        }
-        // 成交数 = 发行卖单总数*匹配单数量占比（例：1.2345%）
-        //计算成交量
-        BigDecimal tradedAmount = focusedOrder.getAmount().multiply(matchOrder.getAmount().divide(totalAmount, 8, BigDecimal.ROUND_HALF_DOWN)).setScale(8, BigDecimal.ROUND_HALF_DOWN);
-        logger.info("dealPrice={},amount={}", dealPrice, tradedAmount);
-        //如果成交额为0说明剩余额度无法成交，退出
-        if (tradedAmount.compareTo(BigDecimal.ZERO) == 0) {
-            return null;
-        }
-
-        //计算成交额,成交额要保留足够精度
-        BigDecimal turnover = tradedAmount.multiply(dealPrice).setScale(8, BigDecimal.ROUND_HALF_DOWN);
-        matchOrder.setTradedAmount(matchOrder.getTradedAmount().add(tradedAmount).setScale(8, BigDecimal.ROUND_HALF_DOWN));
-        matchOrder.setTurnover(matchOrder.getTurnover().add(turnover).setScale(8, BigDecimal.ROUND_HALF_DOWN));
-        focusedOrder.setTradedAmount(focusedOrder.getTradedAmount().add(tradedAmount).setScale(8, BigDecimal.ROUND_HALF_DOWN));
-        focusedOrder.setTurnover(focusedOrder.getTurnover().add(turnover).setScale(8, BigDecimal.ROUND_HALF_DOWN));
-
-        //创建成交记录
-        ExchangeTrade exchangeTrade = new ExchangeTrade();
-        exchangeTrade.setSymbol(symbol);
-        exchangeTrade.setAmount(tradedAmount);
-        exchangeTrade.setDirection(focusedOrder.getDirection());
-        exchangeTrade.setPrice(dealPrice);
-        exchangeTrade.setBuyTurnover(turnover);
-        exchangeTrade.setSellTurnover(turnover);
-
-        if (focusedOrder.getDirection() == ExchangeOrderDirection.BUY) {
-            exchangeTrade.setBuyOrderId(focusedOrder.getOrderId());
-            exchangeTrade.setSellOrderId(matchOrder.getOrderId());
-        } else {
-            exchangeTrade.setBuyOrderId(matchOrder.getOrderId());
-            exchangeTrade.setSellOrderId(focusedOrder.getOrderId());
-        }
-
-        exchangeTrade.setTime(Calendar.getInstance().getTimeInMillis());
-        if (matchOrder.getType() == ExchangeOrderType.LIMIT_PRICE) {
-            if (matchOrder.getDirection() == ExchangeOrderDirection.BUY) {
-                buyTradePlate.remove(matchOrder, tradedAmount);
-            } else {
-                sellTradePlate.remove(matchOrder, tradedAmount);
-            }
-        }
-        return exchangeTrade;
-    }
-
     public void handleExchangeTrade(List<ExchangeTrade> trades) {
-        //logger.info("handleExchangeTrade:{}", trades);
         if (trades.size() > 0) {
             int maxSize = 1000;
-            //发送消息，key为交易对符号
-            if (trades.size() > maxSize) {
-                int size = trades.size();
+            int size = trades.size();
+            //如果交易数超过1000，一次发1000个
+            if (size > 1000) {
                 for (int index = 0; index < size; index += maxSize) {
-                    int length = (size - index) > maxSize ? maxSize : size - index;
-                    List<ExchangeTrade> subTrades = trades.subList(index, index + length);
+                    int length = Math.min((size - index), maxSize);
+                    List<ExchangeTrade> subTrades = trades.subList(index, length);
                     kafkaTemplate.send("exchange-trade", JSON.toJSONString(subTrades));
                 }
             } else {
@@ -601,7 +317,12 @@ public class CoinTrader {
         }
     }
 
-    private void sendKafkaMessage(List<ExchangeOrder> orders) {
+    /**
+     * 发送订单交易成功消息
+     *
+     * @param orders
+     */
+    private void sendCompletedMessage(List<ExchangeOrder> orders) {
         String payload = JSON.toJSONString(orders);
         CompletableFuture<SendResult<String, String>> future = kafkaTemplate
                 .send("exchange-order-completed", payload)
@@ -624,21 +345,19 @@ public class CoinTrader {
      * @param orders
      */
     public void orderCompleted(List<ExchangeOrder> orders) {
-        //logger.info("orderCompleted ,order={}",orders);
-        if (orders == null || orders.isEmpty()) {
-            return;
-        }
-        if (orders.size() > MAX_BATCH_SIZE) {
+        if (!orders.isEmpty()) {
+            int maxSize = 1000;
             int size = orders.size();
-            for (int index = 0; index < size; index += MAX_BATCH_SIZE) {
-//                int length = Math.min((size - index), maxSize);
-//                List<ExchangeOrder> subOrders = orders.subList(index,index + length);
-                int end = Math.min(index + MAX_BATCH_SIZE, size);
-                List<ExchangeOrder> subOrders = orders.subList(index, end);
-                sendKafkaMessage(subOrders);
+            //如果交易数超过1000，一次发1000个
+            if (size > 1000) {
+                for (int index = 0; index < size; index += maxSize) {
+                    int length = Math.min((size - index), maxSize);
+                    List<ExchangeOrder> subOrders = orders.subList(index, length);
+                    sendCompletedMessage(subOrders);
+                }
+            } else {
+                sendCompletedMessage(orders);
             }
-        } else {
-            sendKafkaMessage(orders);
         }
     }
 
@@ -649,7 +368,7 @@ public class CoinTrader {
      */
     public void sendTradePlateMessage(TradePlate plate) {
         //防止并发引起数组越界，造成盘口倒挂
-        synchronized (plate) {
+        synchronized (plate.getItems()) {
             kafkaTemplate.send("exchange-trade-plate", JSON.toJSONString(plate));
         }
     }
@@ -712,7 +431,7 @@ public class CoinTrader {
         return null;
     }
 
-    public void onRemoveOrder(ExchangeOrder order) {
+    private void onRemoveOrder(ExchangeOrder order) {
         if (order.getType() == ExchangeOrderType.LIMIT_PRICE) {
             if (order.getDirection() == ExchangeOrderDirection.BUY) {
                 buyTradePlate.remove(order);

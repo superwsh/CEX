@@ -186,40 +186,11 @@ public class DefaultCoinProcessor implements CoinProcessor {
 
     @Override
     public void process(List<ExchangeTrade> trades) {
-        if (!isHalt) {
-            if (trades == null || trades.size() == 0) {
-                return;
-            }
-            synchronized (currentKLine) {
-                for (ExchangeTrade exchangeTrade : trades) {
-                    //处理K线
-                    processTrade(currentKLine, exchangeTrade);
-                    //处理今日概况信息
-                    logger.debug("处理今日概况信息");
-                    handleThumb(exchangeTrade);
-                    //存储并推送成交信息
-                    handleTradeStorage(exchangeTrade);
-                }
-            }
-        }
+
     }
 
     public void processTrade(KLine kLine, ExchangeTrade exchangeTrade) {
-        if (kLine.getClosePrice().compareTo(BigDecimal.ZERO) == 0) {
-            //第一次设置K线值
-            kLine.setOpenPrice(exchangeTrade.getPrice());
-            kLine.setHighestPrice(exchangeTrade.getPrice());
-            kLine.setLowestPrice(exchangeTrade.getPrice());
-            kLine.setClosePrice(exchangeTrade.getPrice());
-        } else {
-            kLine.setHighestPrice(exchangeTrade.getPrice().max(kLine.getHighestPrice()));
-            kLine.setLowestPrice(exchangeTrade.getPrice().min(kLine.getLowestPrice()));
-            kLine.setClosePrice(exchangeTrade.getPrice());
-        }
-        kLine.setCount(kLine.getCount() + 1);
-        kLine.setVolume(kLine.getVolume().add(exchangeTrade.getAmount()));
-        BigDecimal turnover = exchangeTrade.getPrice().multiply(exchangeTrade.getAmount());
-        kLine.setTurnover(kLine.getTurnover().add(turnover));
+
     }
 
     public void handleTradeStorage(ExchangeTrade exchangeTrade) {
@@ -235,38 +206,7 @@ public class DefaultCoinProcessor implements CoinProcessor {
     }
 
     public void handleThumb(ExchangeTrade exchangeTrade) {
-        logger.info("handleThumb symbol = {}", this.symbol);
-        synchronized (coinThumb) {
-            if (coinThumb.getOpen().compareTo(BigDecimal.ZERO) == 0) {
-                //第一笔交易记为开盘价
-                coinThumb.setOpen(exchangeTrade.getPrice());
-            }
-            coinThumb.setHigh(exchangeTrade.getPrice().max(coinThumb.getHigh()));
-            if (coinThumb.getLow().compareTo(BigDecimal.ZERO) == 0) {
-                coinThumb.setLow(exchangeTrade.getPrice());
-            } else {
-                coinThumb.setLow(exchangeTrade.getPrice().min(coinThumb.getLow()));
-            }
-            coinThumb.setClose(exchangeTrade.getPrice());
-            coinThumb.setVolume(coinThumb.getVolume().add(exchangeTrade.getAmount()).setScale(4, RoundingMode.UP));
-            BigDecimal turnover = exchangeTrade.getPrice().multiply(exchangeTrade.getAmount()).setScale(4, RoundingMode.UP);
-            coinThumb.setTurnover(coinThumb.getTurnover().add(turnover));
-            BigDecimal change = coinThumb.getClose().subtract(coinThumb.getOpen());
-            coinThumb.setChange(change);
-            if (coinThumb.getLow().compareTo(BigDecimal.ZERO) > 0) {
-                coinThumb.setChg(change.divide(coinThumb.getLow(), 4, BigDecimal.ROUND_UP));
-            }
-            if ("USDT".equalsIgnoreCase(baseCoin)) {
-                logger.info("setUsdRate", exchangeTrade.getPrice());
-                coinThumb.setUsdRate(exchangeTrade.getPrice());
-            } else {
 
-            }
-            coinThumb.setBaseUsdRate(coinExchangeRate.getUsdRate(baseCoin));
-            coinThumb.setUsdRate(exchangeTrade.getPrice().multiply(coinExchangeRate.getUsdRate(baseCoin)));
-            logger.info("setUsdRate", exchangeTrade.getPrice().multiply(coinExchangeRate.getUsdRate(baseCoin)));
-            logger.info("thumb = {}", coinThumb);
-        }
     }
 
     @Override

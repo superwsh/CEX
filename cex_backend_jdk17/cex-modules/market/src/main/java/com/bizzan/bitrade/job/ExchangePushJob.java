@@ -55,56 +55,20 @@ public class ExchangePushJob {
         }
     }
 
-
+    /**
+     * 定时任务：推送交易信息
+     */
     @Scheduled(fixedRate = 500)
     public void pushTrade(){
-        Iterator<Map.Entry<String,List<ExchangeTrade>>> entryIterator = tradesQueue.entrySet().iterator();
-        while (entryIterator.hasNext()){
-            Map.Entry<String,List<ExchangeTrade>> entry =  entryIterator.next();
-            String symbol = entry.getKey();
-            List<ExchangeTrade> trades = entry.getValue();
-            if(trades.size() > 0){
-                synchronized (trades) {
-                    messagingTemplate.convertAndSend("/topic/market/trade/" + symbol, trades);
-                    trades.clear();
-                }
-            }
-        }
+
     }
 
-
+    /**
+     * 定时任务：推送盘口信息
+     */
     @Scheduled(fixedDelay = 2000)
     public void pushPlate(){
-        Iterator<Map.Entry<String,List<TradePlate>>> entryIterator = plateQueue.entrySet().iterator();
-        while (entryIterator.hasNext()){
-            Map.Entry<String,List<TradePlate>> entry =  entryIterator.next();
-            String symbol = entry.getKey();
-            List<TradePlate> plates = entry.getValue();
-            if(plates.size() > 0){
-                boolean hasPushAskPlate = false;
-                boolean hasPushBidPlate = false;
-                synchronized (plates) {
-                    for(TradePlate plate:plates) {
-                        if(plate.getDirection() == ExchangeOrderDirection.BUY && !hasPushBidPlate) {
-                            hasPushBidPlate = true;
-                        }
-                        else if(plate.getDirection() == ExchangeOrderDirection.SELL && !hasPushAskPlate){
-                            hasPushAskPlate = true;
-                        }
-                        else {
-                            continue;
-                        }
-                        //websocket推送盘口信息
-                        messagingTemplate.convertAndSend("/topic/market/trade-plate/" + symbol, plate.toJSON(24));
-                        //websocket推送深度信息
-                        messagingTemplate.convertAndSend("/topic/market/trade-depth/" + symbol, plate.toJSON(50));
-                        //netty推送
-                        nettyHandler.handlePlate(symbol, plate);
-                    }
-                    plates.clear();
-                }
-            }
-        }
+
     }
 
     @Scheduled(fixedRate = 500)
