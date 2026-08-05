@@ -29,92 +29,104 @@ import java.util.concurrent.TimeUnit;
 @Component
 @Slf4j
 public class ExchangeTradeConsumer {
-	private Logger logger = LoggerFactory.getLogger(ExchangeTradeConsumer.class);
-	@Autowired
-	private CoinProcessorFactory coinProcessorFactory;
-	@Autowired
-	private SimpMessagingTemplate messagingTemplate;
-	@Autowired
-	private ExchangeOrderService exchangeOrderService;
-	@Autowired
-	private NettyHandler nettyHandler;
-	@Value("${second.referrer.award}")
-	private boolean secondReferrerAward;
-	private ExecutorService executor = new ThreadPoolExecutor(30, 100, 0L, TimeUnit.MILLISECONDS,
-			new LinkedBlockingQueue<Runnable>(1024), new ThreadPoolExecutor.AbortPolicy());
-	@Autowired
-	private ExchangePushJob pushJob;
+    private Logger logger = LoggerFactory.getLogger(ExchangeTradeConsumer.class);
+    @Autowired
+    private CoinProcessorFactory coinProcessorFactory;
+    @Autowired
+    private SimpMessagingTemplate messagingTemplate;
+    @Autowired
+    private ExchangeOrderService exchangeOrderService;
+    @Autowired
+    private NettyHandler nettyHandler;
+    @Value("${second.referrer.award}")
+    private boolean secondReferrerAward;
+    private ExecutorService executor = new ThreadPoolExecutor(30, 100, 0L, TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<Runnable>(1024), new ThreadPoolExecutor.AbortPolicy());
+    @Autowired
+    private ExchangePushJob pushJob;
 
-	/**
-	 * 处理成交明细
-	 *
-	 * @param records
-	 */
-	@KafkaListener(topics = "exchange-trade", containerFactory = "kafkaListenerContainerFactory")
-	public void handleTrade(List<ConsumerRecord<String, String>> records) {
+    /**
+     * 处理成交明细
+     *
+     * @param records
+     */
+    @KafkaListener(topics = "exchange-trade", containerFactory = "kafkaListenerContainerFactory")
+    public void handleTrade(List<ConsumerRecord<String, String>> records) {
+        for (int i = 0; i < records.size(); i++) {
+            ConsumerRecord<String, String> record = records.get(i);
+            //在高并发环境下，交易消息会非常多，使用线程池快速消费
+            executor.submit(new HandleTradeThread(record));
+        }
+    }
 
-	}
+    @KafkaListener(topics = "exchange-order-completed", containerFactory = "kafkaListenerContainerFactory")
+    public void handleOrderCompleted(List<ConsumerRecord<String, String>> records) {
 
-	@KafkaListener(topics = "exchange-order-completed", containerFactory = "kafkaListenerContainerFactory")
-	public void handleOrderCompleted(List<ConsumerRecord<String, String>> records) {
+    }
 
-	}
+    /**
+     * 处理模拟交易
+     *
+     * @param records
+     */
+    @KafkaListener(topics = "exchange-trade-mocker", containerFactory = "kafkaListenerContainerFactory")
+    public void handleMockerTrade(List<ConsumerRecord<String, String>> records) {
+        try {
+            for (int i = 0; i < records.size(); i++) {
+                ConsumerRecord<String, String> record = records.get(i);
+                logger.info("mock数据topic={},value={},size={}", record.topic(), record.value(), records.size());
+                List<ExchangeTrade> trades = JSON.parseArray(record.value(), ExchangeTrade.class);
+                String symbol = trades.get(0).getSymbol();
+                // 处理行情
+                CoinProcessor coinProcessor = coinProcessorFactory.getProcessor(symbol);
+                if (coinProcessor != null) {
+                    coinProcessor.process(trades);
+                }
+                pushJob.addTrades(symbol, trades);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
-	/**
-	 * 处理模拟交易
-	 *
-	 * @param records
-	 */
-	@KafkaListener(topics = "exchange-trade-mocker", containerFactory = "kafkaListenerContainerFactory")
-	public void handleMockerTrade(List<ConsumerRecord<String, String>> records) {
-		try {
-			for (int i = 0; i < records.size(); i++) {
-				ConsumerRecord<String, String> record = records.get(i);
-				logger.info("mock数据topic={},value={},size={}", record.topic(), record.value(), records.size());
-				List<ExchangeTrade> trades = JSON.parseArray(record.value(), ExchangeTrade.class);
-				String symbol = trades.get(0).getSymbol();
-				// 处理行情
-				CoinProcessor coinProcessor = coinProcessorFactory.getProcessor(symbol);
-				if (coinProcessor != null) {
-					coinProcessor.process(trades);
-				}
-				pushJob.addTrades(symbol, trades);
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-	}
+    /**
+     * 消费交易盘口信息
+     *
+     * @param records
+     */
+    @KafkaListener(topics = "exchange-trade-plate", containerFactory = "kafkaListenerContainerFactory")
+    public void handleTradePlate(List<ConsumerRecord<String, String>> records) {
 
-	/**
-	 * 消费交易盘口信息
-	 *
-	 * @param records
-	 */
-	@KafkaListener(topics = "exchange-trade-plate", containerFactory = "kafkaListenerContainerFactory")
-	public void handleTradePlate(List<ConsumerRecord<String, String>> records) {
+    }
 
-	}
+    /**
+     * 订单取消成功
+     *
+     * @param records
+     */
+    @KafkaListener(topics = "exchange-order-cancel-success", containerFactory = "kafkaListenerContainerFactory")
+    public void handleOrderCanceled(List<ConsumerRecord<String, String>> records) {
 
-	/**
-	 * 订单取消成功
-	 *
-	 * @param records
-	 */
-	@KafkaListener(topics = "exchange-order-cancel-success", containerFactory = "kafkaListenerContainerFactory")
-	public void handleOrderCanceled(List<ConsumerRecord<String, String>> records) {
+    }
 
-	}
+    public class HandleTradeThread implements Runnable {
+        private ConsumerRecord<String, String> record;
 
-	public class HandleTradeThread implements Runnable {
-		private ConsumerRecord<String, String> record;
+        private HandleTradeThread(ConsumerRecord<String, String> record) {
+            this.record = record;
+        }
 
-		private HandleTradeThread(ConsumerRecord<String, String> record) {
-			this.record = record;
-		}
-
-		@Override
-		public void run() {
-
-		}
-	}
+        @Override
+        public void run() {
+            try {
+                List<ExchangeTrade> exchangeTrades = JSON.parseArray(record.value(), ExchangeTrade.class);
+                for (ExchangeTrade trade : exchangeTrades) {
+                    //处理交易明细
+                    exchangeOrderService.processExchangeTrade(trade, secondReferrerAward);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
 }

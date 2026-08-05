@@ -272,7 +272,27 @@ public class ExchangeOrderService extends BaseService {
      */
     @Transactional
     public MessageResult processExchangeTrade(ExchangeTrade trade, boolean secondReferrerAward) throws Exception {
-
+        log.info("processExchangeTrade,trade = {}", trade);
+        ExchangeCoin coin = exchangeCoinService.findBySymbol(trade.getSymbol());
+        if (coin == null) {
+            log.error("order not found");
+            return MessageResult.error(500, "invalid trade symbol {}" + trade.getSymbol());
+        }
+        ExchangeOrder buyOrder = exchangeOrderRepository.findByOrderId(trade.getBuyOrderId());
+        ExchangeOrder sellOrder = exchangeOrderRepository.findByOrderId(trade.getSellOrderId());
+        if (buyOrder == null || sellOrder == null) {
+            log.error("order not found");
+            return MessageResult.error(500, "order not found");
+        }
+        //根据memberId锁表，保证钱包余额的正确性
+        DB.query("select id from member_wallet where member_id = ? for update;", buyOrder.getMemberId());
+        //处理买入订单--手续费是交易币
+        processOrder(buyOrder, trade, coin, secondReferrerAward);
+        if (!buyOrder.getMemberId().equals(sellOrder.getMemberId())) {
+            DB.query("select id from member_wallet where member_id = ? for update;", sellOrder.getMemberId());
+        }
+        //出入卖出订单--手续费是基准币
+        processOrder(sellOrder, trade, coin, secondReferrerAward);
         return MessageResult.success("process success");
     }
 
@@ -286,6 +306,32 @@ public class ExchangeOrderService extends BaseService {
      * @return
      */
     public void processOrder(ExchangeOrder order, ExchangeTrade trade, ExchangeCoin coin, boolean secondReferrerAward) {
+        //添加成交详情
+        ExchangeOrderDetail orderDetail = new ExchangeOrderDetail();
+        orderDetail.setOrderId(order.getOrderId());
+        orderDetail.setPrice(order.getPrice());
+        orderDetail.setAmount(order.getAmount());
+        orderDetail.setTime(System.currentTimeMillis());
+
+        //成交额，手续费
+        BigDecimal turnover, fee;
+        if (trade.getDirection() == ExchangeOrderDirection.BUY) {
+            turnover = trade.getBuyTurnover();
+            //买入单手续费为交易币
+            fee = trade.getAmount().multiply(coin.getFee());
+        } else {
+            turnover = trade.getSellTurnover();
+            //卖出单手续费为基准币
+            fee = turnover.multiply(coin.getFee());
+        }
+        // ID为1的用户为机器人，ID为10001的用户为超级管理员，不收取手续费
+        if(order.getMemberId() == 1 || order.getMemberId() == 10001) {
+            fee = BigDecimal.ZERO;
+        }
+        orderDetail.setTurnover(turnover);
+        orderDetail.setFee(fee);
+        exchangeOrderDetailService.save(orderDetail);
+
     }
 
     public List<ExchangeOrderDetail> getAggregation(String orderId) {
