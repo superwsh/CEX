@@ -60,7 +60,19 @@ public class ExchangePushJob {
      */
     @Scheduled(fixedRate = 500)
     public void pushTrade(){
-
+        Iterator<Map.Entry<String, List<ExchangeTrade>>> iterator = tradesQueue.entrySet().iterator();
+        while (iterator.hasNext()){
+            Map.Entry<String, List<ExchangeTrade>> entry = iterator.next();
+            List<ExchangeTrade> trades = entry.getValue();
+            String symbol = trades.get(0).getSymbol();
+            if(!trades.isEmpty()){
+                // 每一个代币对的交易信息都存在并发可能
+                synchronized (trades){
+                    messagingTemplate.convertAndSend("/topic/market/trade/" + symbol, trades);
+                    trades.clear();
+                }
+            }
+        }
     }
 
     /**

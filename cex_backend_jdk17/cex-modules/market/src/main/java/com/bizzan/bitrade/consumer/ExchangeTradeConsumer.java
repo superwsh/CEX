@@ -4,7 +4,6 @@ import com.alibaba.fastjson2.JSON;
 import com.bizzan.bitrade.constant.NettyCommand;
 import com.bizzan.bitrade.entity.ExchangeOrder;
 import com.bizzan.bitrade.entity.ExchangeTrade;
-import com.bizzan.bitrade.entity.TradePlate;
 import com.bizzan.bitrade.handler.NettyHandler;
 import com.bizzan.bitrade.job.ExchangePushJob;
 import com.bizzan.bitrade.processor.CoinProcessor;
@@ -52,8 +51,7 @@ public class ExchangeTradeConsumer {
      */
     @KafkaListener(topics = "exchange-trade", containerFactory = "kafkaListenerContainerFactory")
     public void handleTrade(List<ConsumerRecord<String, String>> records) {
-        for (int i = 0; i < records.size(); i++) {
-            ConsumerRecord<String, String> record = records.get(i);
+        for (ConsumerRecord<String, String> record : records) {
             //在高并发环境下，交易消息会非常多，使用线程池快速消费
             executor.submit(new HandleTradeThread(record));
         }
@@ -61,7 +59,18 @@ public class ExchangeTradeConsumer {
 
     @KafkaListener(topics = "exchange-order-completed", containerFactory = "kafkaListenerContainerFactory")
     public void handleOrderCompleted(List<ConsumerRecord<String, String>> records) {
-
+        logger.info("接收到exchange-order-completed消息");
+        for (ConsumerRecord<String, String> record : records) {
+            List<ExchangeOrder> orders = JSON.parseArray(record.value(), ExchangeOrder.class);
+            for (ExchangeOrder order : orders) {
+                String symbol = order.getSymbol();
+                // 处理委托订单
+                exchangeOrderService.orderCompleted(order.getOrderId(), order.getTradedAmount(), order.getTurnover());
+                // 发送消息
+                messagingTemplate.convertAndSend("/topic/market/order-completed/" + symbol + "/" + order.getMemberId(), order);
+                nettyHandler.handleOrder(NettyCommand.PUSH_EXCHANGE_ORDER_COMPLETED, order);
+            }
+        }
     }
 
     /**
@@ -121,8 +130,29 @@ public class ExchangeTradeConsumer {
             try {
                 List<ExchangeTrade> exchangeTrades = JSON.parseArray(record.value(), ExchangeTrade.class);
                 for (ExchangeTrade trade : exchangeTrades) {
+                    String symbol = exchangeTrades.get(0).getSymbol();
                     //处理交易明细
                     exchangeOrderService.processExchangeTrade(trade, secondReferrerAward);
+
+                    //推送websocket订单成交订阅
+                    ExchangeOrder buyOrder = exchangeOrderService.findOne(trade.getBuyOrderId());
+                    ExchangeOrder sellOrder = exchangeOrderService.findOne(trade.getSellOrderId());
+                    messagingTemplate.convertAndSend(
+                            "/topic/market/order-trade/" + symbol + "/" + buyOrder.getMemberId(), buyOrder);
+                    messagingTemplate.convertAndSend(
+                            "/topic/market/order-trade/" + symbol + "/" + sellOrder.getMemberId(), sellOrder);
+                    //推送netty订单信息
+                    nettyHandler.handleOrder(NettyCommand.PUSH_EXCHANGE_ORDER_TRADE, buyOrder);
+                    nettyHandler.handleOrder(NettyCommand.PUSH_EXCHANGE_ORDER_TRADE, sellOrder);
+
+                    //处理K线
+                    CoinProcessor processor = coinProcessorFactory.getProcessor(symbol);
+                    if (processor != null) {
+                        processor.process(exchangeTrades);
+                    }
+
+                    //推送websocket交易订阅
+                    pushJob.addTrades(symbol, exchangeTrades);
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);

@@ -306,7 +306,7 @@ public class ExchangeOrderService extends BaseService {
      * @return
      */
     public void processOrder(ExchangeOrder order, ExchangeTrade trade, ExchangeCoin coin, boolean secondReferrerAward) {
-        //添加成交详情
+        // 1.添加成交详情
         ExchangeOrderDetail orderDetail = new ExchangeOrderDetail();
         orderDetail.setOrderId(order.getOrderId());
         orderDetail.setPrice(order.getPrice());
@@ -325,13 +325,81 @@ public class ExchangeOrderService extends BaseService {
             fee = turnover.multiply(coin.getFee());
         }
         // ID为1的用户为机器人，ID为10001的用户为超级管理员，不收取手续费
-        if(order.getMemberId() == 1 || order.getMemberId() == 10001) {
+        if (order.getMemberId() == 1 || order.getMemberId() == 10001) {
             fee = BigDecimal.ZERO;
         }
         orderDetail.setTurnover(turnover);
         orderDetail.setFee(fee);
         exchangeOrderDetailService.save(orderDetail);
 
+        // 2.聚合币币交易订单手续费明细存入mongodb
+        OrderDetailAggregation aggregation = new OrderDetailAggregation();
+        aggregation.setOrderId(order.getOrderId());
+        aggregation.setType(OrderTypeEnum.EXCHANGE);
+        aggregation.setTime(System.currentTimeMillis());
+        aggregation.setFee(coin.getFee().doubleValue());
+        aggregation.setAmount(order.getAmount().doubleValue());
+        if (order.getDirection() == ExchangeOrderDirection.BUY) {
+            aggregation.setUnit(order.getBaseSymbol());
+        } else {
+            aggregation.setUnit(order.getCoinSymbol());
+        }
+        aggregation.setDirection(order.getDirection());
+        Member member = memberService.findOne(order.getMemberId());
+        if (member != null) {
+            aggregation.setUsername(member.getUsername());
+            aggregation.setRealName(member.getRealName());
+            aggregation.setMemberId(member.getId());
+        }
+        orderDetailAggregationRepository.save(aggregation);
+
+        // 3.更新用户钱包余额
+        // 增加余额：买入单增加的是交易币余额，卖出单增加的是基准币余额。需要扣除手续费！！！
+        BigDecimal increaseAmount;
+        String increaseSymbol;
+        if (order.getDirection() == ExchangeOrderDirection.BUY) {
+            increaseAmount = trade.getAmount().subtract(fee);
+            increaseSymbol = order.getCoinSymbol();
+        } else {
+            increaseAmount = turnover.subtract(fee);
+            increaseSymbol = order.getBaseSymbol();
+        }
+        MemberWallet increaseMemberWallet = memberWalletService.findByCoinUnitAndMemberId(increaseSymbol, member.getId());
+        memberWalletService.increaseBalance(increaseMemberWallet.getId(), increaseAmount);
+        // 扣除余额：买入单扣除的是基准币余额，卖出单扣除的是交易币余额
+        BigDecimal decreaseAmount;
+        String decreaseSymbol;
+        if (order.getDirection() == ExchangeOrderDirection.BUY) {
+            decreaseAmount = turnover;
+            decreaseSymbol = order.getBaseSymbol();
+        } else {
+            decreaseAmount = trade.getAmount();
+            decreaseSymbol = order.getCoinSymbol();
+        }
+        MemberWallet decreaseMemberWallet = memberWalletService.findByCoinUnitAndMemberId(decreaseSymbol, member.getId());
+        memberWalletService.increaseBalance(decreaseMemberWallet.getId(), decreaseAmount);
+
+        // 4.添加用户的出入币交易记录
+        // 入币记录
+        MemberTransaction inTransaction = new MemberTransaction();
+        inTransaction.setAmount(increaseAmount);
+        inTransaction.setType(TransactionType.EXCHANGE);
+        inTransaction.setSymbol(increaseSymbol);
+        inTransaction.setAddress("");
+        inTransaction.setFee(fee);
+        inTransaction.setRealFee(fee.toString());
+        inTransaction.setDiscountFee("0");
+        transactionService.save(inTransaction);
+        // 出币记录
+        MemberTransaction outTransaction = new MemberTransaction();
+        outTransaction.setAmount(decreaseAmount);
+        outTransaction.setType(TransactionType.EXCHANGE);
+        outTransaction.setSymbol(decreaseSymbol);
+        outTransaction.setAddress("");
+        outTransaction.setFee(BigDecimal.ZERO);
+        outTransaction.setRealFee("0");
+        outTransaction.setDiscountFee("0");
+        transactionService.save(outTransaction);
     }
 
     public List<ExchangeOrderDetail> getAggregation(String orderId) {
@@ -477,32 +545,50 @@ public class ExchangeOrderService extends BaseService {
      * @return
      */
     @Transactional
-    public MessageResult tradeCompleted(String orderId, BigDecimal tradedAmount, BigDecimal turnover) {
+    public MessageResult orderCompleted(String orderId, BigDecimal tradedAmount, BigDecimal turnover) {
+        // 修改订单状态
         ExchangeOrder order = exchangeOrderRepository.findByOrderId(orderId);
         if (order.getStatus() != ExchangeOrderStatus.TRADING) {
-            return MessageResult.error(500, "invalid order(" + orderId + "),not trading status");
+            return MessageResult.error(500, "订单" + orderId + "已完成");
         }
-        order.setTradedAmount(tradedAmount);
-        order.setTurnover(turnover);
         order.setStatus(ExchangeOrderStatus.COMPLETED);
-        order.setCompletedTime(Calendar.getInstance().getTimeInMillis());
+        order.setCompletedTime(System.currentTimeMillis());
         exchangeOrderRepository.saveAndFlush(order);
 
-        //处理用户钱包,对冻结作处理，剩余成交额退回
-        orderRefund(order, tradedAmount, turnover);
-
+        // 解冻钱包，退币
+        this.orderRefund(order, tradedAmount, turnover);
         return MessageResult.success("tradeCompleted success");
     }
 
     /**
-     * 委托退款，如果取消订单或成交完成有剩余
+     * 委托单退款（如果取消订单或成交完成有剩余）
      *
      * @param order
      * @param tradedAmount
      * @param turnover
      */
     public void orderRefund(ExchangeOrder order, BigDecimal tradedAmount, BigDecimal turnover) {
+        // 冻结的数额，成交的数额
+        BigDecimal frozenBalance, dealBalance;
+        if (order.getDirection() == ExchangeOrderDirection.BUY) {
+            if (order.getType() == ExchangeOrderType.LIMIT_PRICE) {
+                frozenBalance = order.getAmount().multiply(order.getPrice());
+            } else {
+                frozenBalance = order.getAmount();
+            }
+            dealBalance = turnover;
+        } else {
+            frozenBalance = order.getAmount();
+            dealBalance = tradedAmount;
+        }
+        String coinSymbol = order.getDirection() == ExchangeOrderDirection.BUY ? order.getBaseSymbol() : order.getCoinSymbol();
+        MemberWallet memberWallet = memberWalletService.findByCoinUnitAndMemberId(coinSymbol, order.getMemberId());
 
+        BigDecimal refund = frozenBalance.subtract(dealBalance);
+        if(refund.compareTo(BigDecimal.ZERO)>0){
+            memberWalletService.thawBalance(memberWallet,refund);
+        }
+        log.info("===cancel==退币：" + refund);
     }
 
     /**
@@ -692,7 +778,7 @@ public class ExchangeOrderService extends BaseService {
         order.setTradedAmount(tradedAmount);
         order.setTurnover(turnover);
         if (order.isCompleted()) {
-            tradeCompleted(order.getOrderId(), order.getTradedAmount(), order.getTurnover());
+            orderCompleted(order.getOrderId(), order.getTradedAmount(), order.getTurnover());
         } else {
             cancelOrder(order.getOrderId(), order.getTradedAmount(), order.getTurnover());
         }
