@@ -271,33 +271,30 @@ public class ExchangeOrderService extends BaseService {
      * @throws Exception
      */
     @Transactional
-    public MessageResult processExchangeTrade(ExchangeTrade trade, boolean secondReferrerAward) throws Exception {
+    public void processExchangeTrade(ExchangeTrade trade, boolean secondReferrerAward) throws Exception {
         log.info("processExchangeTrade,trade = {}", trade);
         ExchangeCoin coin = exchangeCoinService.findBySymbol(trade.getSymbol());
         if (coin == null) {
             log.error("order not found");
-            return MessageResult.error(500, "invalid trade symbol {}" + trade.getSymbol());
         }
         ExchangeOrder buyOrder = exchangeOrderRepository.findByOrderId(trade.getBuyOrderId());
         ExchangeOrder sellOrder = exchangeOrderRepository.findByOrderId(trade.getSellOrderId());
         if (buyOrder == null || sellOrder == null) {
             log.error("order not found");
-            return MessageResult.error(500, "order not found");
         }
         //根据memberId锁表，保证钱包余额的正确性
         DB.query("select id from member_wallet where member_id = ? for update;", buyOrder.getMemberId());
         //处理买入订单--手续费是交易币
-        processOrder(buyOrder, trade, coin, secondReferrerAward);
+        processMemberWallet(buyOrder, trade, coin, secondReferrerAward);
         if (!buyOrder.getMemberId().equals(sellOrder.getMemberId())) {
             DB.query("select id from member_wallet where member_id = ? for update;", sellOrder.getMemberId());
         }
-        //出入卖出订单--手续费是基准币
-        processOrder(sellOrder, trade, coin, secondReferrerAward);
-        return MessageResult.success("process success");
+        //处理卖出订单--手续费是基准币
+        processMemberWallet(sellOrder, trade, coin, secondReferrerAward);
     }
 
     /**
-     * 对发生交易的委托处理相应的钱包
+     * 对发生交易的委托，处理相应的钱包
      *
      * @param order               委托订单
      * @param trade               交易详情
@@ -305,7 +302,7 @@ public class ExchangeOrderService extends BaseService {
      * @param secondReferrerAward 二级推荐人是否返佣
      * @return
      */
-    public void processOrder(ExchangeOrder order, ExchangeTrade trade, ExchangeCoin coin, boolean secondReferrerAward) {
+    public void processMemberWallet(ExchangeOrder order, ExchangeTrade trade, ExchangeCoin coin, boolean secondReferrerAward) {
         // 1.添加成交详情
         ExchangeOrderDetail orderDetail = new ExchangeOrderDetail();
         orderDetail.setOrderId(order.getOrderId());
@@ -551,6 +548,8 @@ public class ExchangeOrderService extends BaseService {
         if (order.getStatus() != ExchangeOrderStatus.TRADING) {
             return MessageResult.error(500, "订单" + orderId + "已完成");
         }
+        order.setTradedAmount(tradedAmount);
+        order.setTurnover(turnover);
         order.setStatus(ExchangeOrderStatus.COMPLETED);
         order.setCompletedTime(System.currentTimeMillis());
         exchangeOrderRepository.saveAndFlush(order);
@@ -585,8 +584,8 @@ public class ExchangeOrderService extends BaseService {
         MemberWallet memberWallet = memberWalletService.findByCoinUnitAndMemberId(coinSymbol, order.getMemberId());
 
         BigDecimal refund = frozenBalance.subtract(dealBalance);
-        if(refund.compareTo(BigDecimal.ZERO)>0){
-            memberWalletService.thawBalance(memberWallet,refund);
+        if (refund.compareTo(BigDecimal.ZERO) > 0) {
+            memberWalletService.thawBalance(memberWallet, refund);
         }
         log.info("===cancel==退币：" + refund);
     }
@@ -599,19 +598,15 @@ public class ExchangeOrderService extends BaseService {
      */
     @Transactional
     public MessageResult cancelOrder(String orderId, BigDecimal tradedAmount, BigDecimal turnover) {
-        ExchangeOrder order = findOne(orderId);
-        if (order == null) {
-            return MessageResult.error("order not exists");
-        }
+        ExchangeOrder order = exchangeOrderRepository.findByOrderId(orderId);
         if (order.getStatus() != ExchangeOrderStatus.TRADING) {
             return MessageResult.error(500, "order not in trading");
         }
         order.setTradedAmount(tradedAmount);
         order.setTurnover(turnover);
         order.setStatus(ExchangeOrderStatus.CANCELED);
-        order.setCanceledTime(Calendar.getInstance().getTimeInMillis());
-        //未成交的退款
-        orderRefund(order, tradedAmount, turnover);
+        order.setCanceledTime(System.currentTimeMillis());
+        this.orderRefund(order, tradedAmount, turnover);
         return MessageResult.success();
     }
 

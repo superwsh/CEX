@@ -71,7 +71,31 @@ public class CoinTrader {
      * @param exchangeOrder
      */
     public void addLimitPriceOrder(ExchangeOrder exchangeOrder) {
-
+        TreeMap<BigDecimal, MergeOrder> priceToOrderList;
+        if (exchangeOrder.getDirection() == ExchangeOrderDirection.BUY) {
+            priceToOrderList = buyLimitPriceQueue;
+            buyTradePlate.add(exchangeOrder);
+            if (ready) {
+                sendTradePlateMessage(buyTradePlate);
+            }
+        } else {
+            priceToOrderList = sellLimitPriceQueue;
+            sellTradePlate.add(exchangeOrder);
+            if (ready) {
+                sendTradePlateMessage(sellTradePlate);
+            }
+        }
+        // 将订单加入到对应价格的组合订单中
+        synchronized (priceToOrderList) {
+            MergeOrder mergeOrder = priceToOrderList.get(exchangeOrder.getPrice());
+            if (mergeOrder == null) {
+                mergeOrder = new MergeOrder();
+                mergeOrder.add(exchangeOrder);
+                priceToOrderList.put(exchangeOrder.getPrice(), mergeOrder);
+            } else {
+                mergeOrder.add(exchangeOrder);
+            }
+        }
     }
 
     public void addMarketPriceOrder(ExchangeOrder exchangeOrder) {

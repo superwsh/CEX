@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.bizzan.bitrade.constant.NettyCommand;
 import com.bizzan.bitrade.entity.ExchangeOrder;
 import com.bizzan.bitrade.entity.ExchangeTrade;
+import com.bizzan.bitrade.entity.TradePlate;
 import com.bizzan.bitrade.handler.NettyHandler;
 import com.bizzan.bitrade.job.ExchangePushJob;
 import com.bizzan.bitrade.processor.CoinProcessor;
@@ -105,7 +106,11 @@ public class ExchangeTradeConsumer {
      */
     @KafkaListener(topics = "exchange-trade-plate", containerFactory = "kafkaListenerContainerFactory")
     public void handleTradePlate(List<ConsumerRecord<String, String>> records) {
-
+        for (ConsumerRecord<String, String> record : records) {
+            TradePlate plate = JSON.parseObject(record.value(), TradePlate.class);
+            String symbol = plate.getSymbol();
+            pushJob.addPlates(symbol, plate);
+        }
     }
 
     /**
@@ -115,7 +120,16 @@ public class ExchangeTradeConsumer {
      */
     @KafkaListener(topics = "exchange-order-cancel-success", containerFactory = "kafkaListenerContainerFactory")
     public void handleOrderCanceled(List<ConsumerRecord<String, String>> records) {
-
+        for (ConsumerRecord<String, String> record : records) {
+            ExchangeOrder order = JSON.parseObject(record.value(), ExchangeOrder.class);
+            String symbol = order.getSymbol();
+            // 调用服务处理
+            exchangeOrderService.cancelOrder(order.getOrderId(), order.getTradedAmount(), order.getTurnover());
+            // 推送实时成交
+            messagingTemplate.convertAndSend("/topic/market/order-canceled/" + symbol + "/" + order.getMemberId(),
+                    order);
+            nettyHandler.handleOrder(NettyCommand.PUSH_EXCHANGE_ORDER_CANCELED, order);
+        }
     }
 
     public class HandleTradeThread implements Runnable {

@@ -35,7 +35,7 @@ public class ExchangeOrderConsumer {
             CoinTrader trader = traderFactory.getTrader(order.getSymbol());
             //如果当前币种交易未启用，取消掉所有订单
             if (trader.isTradingHalt() || !trader.getReady()) {
-                kafkaTemplate.send("exchange-order-cancel", JSON.toJSONString(order));
+                kafkaTemplate.send("exchange-order-cancel-success", JSON.toJSONString(order));
             } else {
                 try {
                     long startTime = System.currentTimeMillis();
